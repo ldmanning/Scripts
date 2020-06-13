@@ -1,0 +1,103 @@
+$rootPath = "\\UNCPath\ToSomewhereOn\Network\"
+
+$errorlogfile = "$rootpath\Logs\ErrorLog.log"
+$successlogfile = "$rootPath\Logs\SuccessLog.log"
+
+Function WriteErrorLog{
+	Param([string]$logoutput)
+	Add-content $errorlogfile -value $logoutput
+}
+
+Function WriteSuccessLog{
+	Param([string]$logoutput)
+	add-content $successlogfile -value $logoutput
+}
+
+Function Delete-User {
+     
+     Param([string]$computer,
+          [string]$username)
+try {
+     [ADSI]$server = "WinNT://$computer"
+     $server.delete("user",$username)
+} catch {
+	WriteErrorLog "Error deleting $username on $($computer): $($Error[0].Exception.Message)"	
+}
+}
+
+Function Disable-User {
+
+Param([string]$computer,
+        [string]$username)
+	
+try {
+     	$DisableUser = 2     
+	$objUser = [ADSI]"WinNT://$computer/$username"
+	$objUser.psbase.invokeset("AccountDisabled","True")
+	$objUser.SetInfo()
+} catch {
+	WriteErrorLog "Error disabling $username on $($computer): $($Error[0].Exception.Message)"	
+}
+
+}
+
+
+Function Create-User {
+
+Param(
+[string]$computer,
+[string]$username,
+[string]$password
+)
+$users = $null
+$comp = [ADSI]"WinNT://$computer"
+try {
+	$users = $comp.psbase.children | select -expand name
+	if($users -like $username){
+		Write-Host "$username already exists"
+	} else {
+		$userobj = $comp.Create("user",$username)
+		$userobj.SetPassword($password)
+		$userobj.SetInfo()
+		$userobj.Put("description",$username)
+		$userobj.SetInfo()
+		$userobj.psbase.invokeset("AccountDisabled","False")
+		$userobj.SetInfo()
+		$group = "Administrators"
+		$groupObj = [ADSI]"WinNT://$computer/$group,group"
+		$newuser = [ADSI]"WinNT://$computer/$username"
+		$groupObj.Add($newuser.Path)
+		$users = $comp.psbase.children | select -expand name
+		if($users -like $username){
+			
+		} else {
+			throw "$Username has not been created on $($computer)"
+		}
+	}
+} catch {
+	throw "Error creating $username on $($computer): $($Error[0].Exception.Message)"
+}
+}
+
+
+
+$username = "username"
+$password = "*******"
+
+$success = @()
+$failure = @()
+$listOfComputers = get-adcomputer -filter * -searchbase "OU=Location,OU=Computers,DC=test,DC=com" | where {$_.Name -notlike '*FILTEROUT'} | select Name
+
+
+foreach($comp in $listofComputers.Name){
+try {
+Create-User -computer $comp -username $username -password $password
+
+$success += $comp
+} catch {
+$failure += $comp
+}
+}
+
+$success | out-file -append "$rootPath\LocalAccountSuccessfullyChanged.txt"
+$failure | out-file -append "$rootPath\LocalAccountChangeFailures.txt"
